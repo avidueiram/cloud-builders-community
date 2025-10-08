@@ -1,0 +1,23 @@
+# In this directory, run the following command to build this builder.
+# $ gcloud builds submit . --config=cloudbuild.yaml
+substitutions:
+  _GCLUSTER_VERSION: v1.67.0
+steps:
+- name: 'gcr.io/cloud-builders/docker'
+  # env:
+  # - 'GCLUSTER_VERSION=${_GCLUSTER_VERSION}'
+  args:
+  - build
+  - --build-arg
+  - GCLUSTER_VERSION=${_GCLUSTER_VERSION}
+  - --tag
+  - gcr.io/${PROJECT_ID}/gcluster:${_GCLUSTER_VERSION}
+  - --tag
+  - gcr.io/${PROJECT_ID}/gcluster:latest
+  - .
+- name: 'gcr.io/${PROJECT_ID}/gcluster:${_GCLUSTER_VERSION}'
+  args: ['--version']
+images:
+  - 'gcr.io/${PROJECT_ID}/gcluster:${_GCLUSTER_VERSION}'
+  - 'gcr.io/${PROJECT_ID}/gcluster:latest'
+tags: ['cloud-builders-community']
