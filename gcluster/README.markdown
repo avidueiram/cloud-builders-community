@@ -1,5 +1,7 @@
 # Cluster Toolkit cloud builder
-This builder can be used to run the Cluster Toolkit tool in GKE.
+The [Cluster Toolkit](https://cloud.google.com/cluster-toolkit) is an open-source tool that enables you to deploy and manage high-performance computing (HPC), AI, and ML environments on Google Cloud. By using YAML-based blueprint files, you can easily define and create complete clusters with various components like compute, networking, and storage, following Google Cloud's best practices.
+
+This builder can be used to run the Cluster Toolkit tool in Cloud Build.
 
 ## Getting started
 
