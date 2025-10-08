@@ -1,0 +1,10 @@
+# In this directory, run the following command to build this builder.
+# $ gcloud builds submit . --config=cloudbuild.yaml 
+steps:
+- name: 'gcr.io/${PROJECT_ID}/gcluster'
+  args: [
+    'deploy',
+    'hpc-slurm-custom-multi-group.yaml', 
+    '--auto-approve'
+    ]
+tags: ['cloud-builders-community']

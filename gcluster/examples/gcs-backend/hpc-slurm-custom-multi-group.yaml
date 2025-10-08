@@ -1,0 +1,155 @@
+blueprint_name: hpc-slurm-ubuntu-multi
+
+vars:
+  project_id: #YOUR PROJECT ID
+  deployment_name: hpc-slurm-ubuntu-multi
+  region: us-central1
+  zone: us-central1-a
+  enable_cleanup_compute: true
+  disk_size: 128
+terraform_backend_defaults:
+  type: gcs  
+  configuration:
+    bucket: #YOUR BUCKET
+    prefix: "gcluster/state" 
+
+deployment_groups:
+- group: network
+  modules:
+  - id: network
+    source: modules/network/vpc
+
+- group: nfs
+  modules:
+  - id: nfsshare
+    source: modules/file-system/filestore
+    use: [network]
+    settings:
+      filestore_tier: BASIC_SSD
+      size_gb: 2560  
+      local_mount: /nfsshare
+
+  - id: mount-nfs-at-startup
+    source: modules/scripts/startup-script
+    settings:
+      runners:
+      - $(nfsshare.install_nfs_client_runner)
+      - $(nfsshare.mount_runner)
+      - type: shell
+        destination: /var/tmp/mount_permissions.sh
+        content: |
+          #!/bin/sh
+          chown -R slurm:slurm /nfsshare
+
+- group: slurm-partitions
+  modules:
+  #********************************************************************************
+  #*** C2-standard-4 -> 2 physical cores / 16 GB memory / ON-DEMAND ***************
+  #********************************************************************************
+  - id: c2_4_nodeset
+    source: community/modules/compute/schedmd-slurm-gcp-v6-nodeset
+    use: [network, nfsshare]
+    settings:
+      node_count_dynamic_max: 100
+      machine_type: c2-standard-4
+      bandwidth_tier: gvnic_enabled
+      enable_placement: true
+      allow_automatic_updates: false
+
+  - id: c2_4_partition
+    source: community/modules/compute/schedmd-slurm-gcp-v6-partition
+    use:
+    - c2_4_nodeset
+    settings:
+      partition_name: c2std4
+      is_default: true
+
+  #********************************************************************************
+  #*** h4d-standard-192
+  #********************************************************************************
+  - id: h4d_standard_192_nodeset
+    source: community/modules/compute/schedmd-slurm-gcp-v6-nodeset
+    use: [network, nfsshare]
+    settings:
+      node_count_dynamic_max: 20
+      machine_type: h4d-standard-192
+      bandwidth_tier: gvnic_enabled
+      allow_automatic_updates: false
+      enable_placement: false
+      disk_type: hyperdisk-balanced
+      disk_size_gb: 300
+
+  - id: h4d_standard_192_partition
+    source: community/modules/compute/schedmd-slurm-gcp-v6-partition
+    use:
+    - h4d_standard_192_nodeset
+    settings:
+      partition_name: h4dstd192
+      is_default: false
+
+  #********************************************************************************
+  #*** h4d-standard-192 -> SPOT
+  #********************************************************************************
+  - id: h4d_standard_192_nodeset_spot
+    source: community/modules/compute/schedmd-slurm-gcp-v6-nodeset
+    use: [network, nfsshare]
+    settings:
+      node_count_dynamic_max: 20
+      machine_type: h4d-standard-192
+      bandwidth_tier: gvnic_enabled
+      allow_automatic_updates: false
+      enable_placement: false
+      disk_type: hyperdisk-balanced
+      disk_size_gb: 300
+      enable_spot_vm: true
+      preemptible: true
+
+  - id: h4d_standard_192_partition_spot
+    source: community/modules/compute/schedmd-slurm-gcp-v6-partition
+    use:
+    - h4d_standard_192_nodeset_spot
+    settings:
+      partition_name: h4dstd192spot
+      is_default: false
+  
+  - id: compute_nodeset
+    source: community/modules/compute/schedmd-slurm-gcp-v6-nodeset
+    use:
+    - network
+    - mount-nfs-at-startup
+    settings:
+      node_count_dynamic_max: 20
+      disk_size_gb: $(vars.disk_size)
+      bandwidth_tier: gvnic_enabled
+      allow_automatic_updates: false
+
+  - id: compute_partition
+    source: community/modules/compute/schedmd-slurm-gcp-v6-partition
+    use: [compute_nodeset]
+    settings:
+      partition_name: compute
+      is_default: true
+
+- group: slurm-controller
+  modules:
+  - id: slurm_login
+    source: community/modules/scheduler/schedmd-slurm-gcp-v6-login
+    use: [network]
+    settings:
+      enable_login_public_ips: false
+      disk_size_gb: $(vars.disk_size)
+
+  - id: slurm_controller
+    source: community/modules/scheduler/schedmd-slurm-gcp-v6-controller
+    use:
+    - network
+    - compute_partition
+    - c2_4_partition
+    - h4d_standard_192_partition
+    - h4d_standard_192_partition_spot
+    - slurm_login
+    settings:
+      enable_controller_public_ips: false
+      disk_size_gb: $(vars.disk_size)
+      login_startup_script: $(mount-nfs-at-startup.startup_script)
+      controller_startup_script: $(mount-nfs-at-startup.startup_script)

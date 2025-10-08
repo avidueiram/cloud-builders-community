@@ -1,0 +1,95 @@
+# Copyright 2025 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+---
+blueprint_name: custom-hpc-ubuntu2404-packer
+
+vars:
+  project_id: #YOUR PROJECT ID
+  deployment_name: custom-hpc-ubuntu2404-packer-v3
+  region: us-central1
+  zone: us-central1-f
+  custom_image_name: custom-hpc-ubuntu2404-packer-v3
+  disk_size: 100
+
+deployment_groups:
+- group: primary
+  modules:
+  - id: scripts_for_image
+    source: modules/scripts/startup-script
+    settings:
+      install_ansible: false
+      runners:
+      - type: shell
+        destination: install_basics.sh
+        content: |
+          #!/bin/bash
+          set -e -o pipefail
+          apt-get update
+          apt-get install -y ansible build-essential libevent-dev git coinor-libcoinutils-dev
+      - type: shell
+        destination: prevent_unintentional_upgrades.sh
+        content: |
+          #!/bin/bash
+          set -e -o pipefail
+          systemctl stop unattended-upgrades.service
+          systemctl disable unattended-upgrades.service
+          systemctl mask unattended-upgrades.service
+      - type: data
+        destination: /var/tmp/slurm_vars.json
+        content: |
+          {
+            "reboot": false,
+            "install_cuda": false,
+            "install_gcsfuse": false,
+            "install_lustre": false,
+            "install_nvidia_repo": false,
+            "install_ompi": true,
+            "allow_kernel_upgrades": false,
+            "monitoring_agent": "cloud-ops"
+          }
+      - type: data
+        destination: /etc/security/limits.d/99-unlimited.conf
+        content: |
+          * - memlock unlimited
+          * - nproc unlimited
+          * - stack unlimited
+          * - nofile 1048576
+          * - cpu unlimited
+          * - rtprio unlimited
+      - type: shell
+        destination: signal_packer_done.sh
+        content: |
+          #!/bin/bash
+          set -e -o pipefail
+          echo "Signaling Packer completion manually..."
+          gcloud compute instances add-metadata \$(hostname -s | cut -d'.' -f1) --metadata "startup-script-status"="done" --zone $(vars.zone)
+  - id: network
+    source: modules/network/vpc
+
+- group: packer
+  modules:
+  - id: custom-image
+    source: modules/packer/custom-image
+    kind: packer
+    use:
+    - network
+    - scripts_for_image
+    settings:
+      machine_type: n2-standard-32
+      source_image_project_id: [ubuntu-os-cloud]
+      source_image_family: ubuntu-2404-lts-amd64
+      disk_size: $(vars.disk_size)
+      disk_type: pd-balanced
+      image_name: $(vars.custom_image_name)
+      state_timeout: 60m
